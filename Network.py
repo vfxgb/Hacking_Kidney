@@ -155,13 +155,31 @@ class ASPP(nn.Module):
 import torch.hub
 
 class UneXt50(nn.Module):
-    def __init__(self, stride=1, **kwargs):
+    def __init__(self, in_channels=4, stride=1, **kwargs):
         super().__init__()
         #encoder
-
-        m = torch.hub.load('facebookresearch/semi-supervised-ImageNet1K-models',
-                          'resnext50_32x4d_swsl')
-
+        # m = torch.hub.load('facebookresearch/semi-supervised-ImageNet1K-models',
+        #                     'resnext101_32x4d_swsl')
+        # m = torch.hub.load('facebookresearch/semi-supervised-ImageNet1K-models',
+        #                   'resnext50_32x4d_swsl')
+        m = torchvision.models.resnext50_32x4d(pretrained=False)
+        # m = torch.hub.load(
+        #     'moskomule/senet.pytorch',
+        #     'se_resnet101',
+        #     pretrained=True,)
+        if in_channels != 3:
+            # Create a new conv layer with in_channels input channels and same output channels.
+            new_conv1 = nn.Conv2d(in_channels, m.conv1.out_channels,
+                                kernel_size=m.conv1.kernel_size,
+                                stride=m.conv1.stride,
+                                padding=m.conv1.padding,
+                                bias=False)
+            # Copy the weights for the first three channels from pretrained conv1.
+            new_conv1.weight.data[:, :3, :, :] = m.conv1.weight.data
+            # Initialize extra channel(s) to zero (or you may use another initialization).
+            if in_channels > 3:
+                new_conv1.weight.data[:, 3:, :, :].zero_()
+            m.conv1 = new_conv1
 
         #m=torch.hub.load('zhanghang1989/ResNeSt', 'resnest50', pretrained=True)
         self.enc0 = nn.Sequential(m.conv1, m.bn1, nn.ReLU(inplace=True))
@@ -169,7 +187,7 @@ class UneXt50(nn.Module):
                             m.layer1) #256
         self.enc2 = m.layer2 #512
         self.enc3 = m.layer3 #1024
-        self.enc4 = m.layer4 #2048
+        self.enc4 = m.layer4 #
         #aspp with customized dilatations
         self.aspp = ASPP(2048,256,out_c=512,dilations=[stride*1,stride*2,stride*3,stride*4])
         self.drop_aspp = nn.Dropout2d(0.5)
@@ -198,13 +216,3 @@ class UneXt50(nn.Module):
         x = F.interpolate(x,scale_factor=2,mode='bilinear')
         return x
 
-#split the model to encoder and decoder for fast.ai
-split_layers = lambda m: [list(m.enc0.parameters())+list(m.enc1.parameters())+
-                list(m.enc2.parameters())+list(m.enc3.parameters())+
-                list(m.enc4.parameters()),
-                list(m.aspp.parameters())+list(m.dec4.parameters())+
-                list(m.dec3.parameters())+list(m.dec2.parameters())+
-                list(m.dec1.parameters())+list(m.fpn.parameters())+
-                list(m.final_conv.parameters())]
-
-model = UneXt50().cuda()
